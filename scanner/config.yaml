@@ -1,0 +1,19 @@
+rpc_endpoints:
+  ethereum: "https://eth-mainnet.alchemyapi.io/v2/ulBhde7vN9oTgnyKUgcl5WwM8tw4Osb1"
+
+dexes:
+  - name: "UniswapV2"
+    factory: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
+  - name: "SushiSwap"
+    factory: "0xC0AEe478e3658e2610c5F7A4A2E1777CE9e4f2Ac"
+
+pairs:
+  - token0: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    token1: "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
+
+threshold_spread: 0.005
+poll_interval: 5
+
+telegram:
+  bot_token: "7908312734:AAGeeLcUOOz2mU7P-R_jZCBd2qLX0RvJvio"
+  chat_id: 732460146
