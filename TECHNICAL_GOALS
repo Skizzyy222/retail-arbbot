@@ -1,60 +1,60 @@
 # Technical Goals für DEXArbRadar
 
 ## 1. Core-Scanner & Executor
-- **Multi-Chain Support**  
-  – Mainnet & Sepolia (erste Stufe), später beliebige EVM-Netze (Arbitrum, Polygon, …)  
-- **DEX-Scanner**  
-  – Async-Python-Modul, holt Reserves via Web3 (UniswapV2, SushiSwap, …)  
-  – Berechnet Spread für beliebige ERC-20-Paare  
-  – Poll-Interval konfigurierbar (z. B. 5–30 s)  
+- **Multi-Chain & Multi-Pair**  
+  - Scannt beliebig viele ERC-20-Paare auf Mainnet, Sepolia und weiteren EVM-Netzen  
+- **Asynchroner DEX-Scanner**  
+  - Holt Reserves via Web3, berechnet Spreads, löst Alerts aus  
 - **Flashbots-Executor**  
-  – `run_once()`-Funktion: baut, signiert, simuliert und sendet ein Bundle  
-  – Logging & Error-Handling (Simulation, Bundle-Inklusion)  
-  – Gas-Estimation, EIP-1559 Fees (`baseFeePerGas` + `maxPriorityFeePerGas`)  
-  – Pre-Signing & Pre-Packing (Nonce-Pool, Bundle-Queue) für < 5 ms Hot-Path
+  - `run_once()` simuliert und sendet Bundles  
+  - Gas-Estimation & EIP-1559-Fees  
+  - Pre-Signing & Pre-Packing für < 5 ms Hot-Path  
+- **Automatischer Fee-Split**  
+  - Leitet z. B. 20 % des Profits an die Bot-Owner-Adresse weiter  
 
 ## 2. Telegram-Bot Integration
-- **Single Bot** für Scanner + Executor  
-- **Commands**  
-  - `/start_executor` & `/stop_executor`  
-  - `/set_threshold <Prozent>`  
-  - `/set_network <Netzwerk>`  
-  - `/set_address <0x…>`  
-  - `/set_cex_api <exchange> <key> <secret>`  
-  - `/status`, `/menu` (mit Inline-Buttons)  
-- **Feedback**: Simulationsergebnis, Receipt, Übersprungene Trades
+- **Onboarding per /start**  
+  - Generiert Deposit-Adresse, zeigt WETH-Einzahlungsanweisung  
+- **Inline-Buttons & Commands**  
+  - ▶️ Start Bot / ⏸️ Stop Bot  
+  - ⚙️ Settings: Threshold, Poll-Interval  
+  - 📊 Status: WETH/ETH-Balance, Win-Rate  
+  - 💸 Withdraw  
+- **Live-Feedback**  
+  - Simulationsergebnisse, Receipts, Low-Balance-Warnungen  
 
 ## 3. CEX & Cross-Exchange Arbitrage
-- **Parallel-Scan** von bis zu 10 Quellen (DEXe & CEXe) via WebSocket/REST  
-- **Spread-Matrix** aller Kombis (DEX↔DEX, DEX↔CEX, CEX↔CEX)  
-- **Filter** auf nur durch Nutzer autorisierte Exchanges  
+- **Parallel-Scan** von DEX ↔ DEX, DEX ↔ CEX, CEX ↔ CEX  
+- **Spread-Matrix** über alle Kombis  
 - **Auto-Executor**  
-  – DEX↔DEX → Flashbots-Bundle  
-  – CEX↔DEX oder DEX↔CEX → CEX-Order + DEX-Swap
+  - DEX↔DEX → Flashbots-Bundle  
+  - DEX↔CEX/CEX↔DEX → CEX-Order + DEX-Swap  
 
-## 4. Configuration & Keys
+## 4. Configuration & Secrets-Management
 - **Zentrales `config.yaml`**  
-  – `rpc_endpoints`, `networks.default`  
-  – `dex`-List, `pairs`, `threshold_spread`, `poll_interval`  
-  – `telegram.bot_token`, `telegram.chat_id`  
-  – `executor.private_key_env_var`, `relay_urls`, `target_address`, `calldata`, `value`, `max_priority_fee`  
-- **Environment Variables** für Secrets  
-  – `EXECUTOR_PRIV_KEY`, `NETWORK`, `THRESHOLD`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`  
-  – Verschlüsselte Speicherung von CEX-API-Keys (AES-256)
+  - Netzwerke, RPCs, DEX-Factorys, Paare, Thresholds, Poll-Interval  
+  - Executor: Private-Key-Env, Relay-URLs, Fee-Split  
+  - Telegram: Bot-Token-Env, Chat-ID-Env  
+- **Environment-Variablen** für alle Secrets (Private Keys, CEX-API Keys)  
 
 ## 5. Performance & Infrastruktur
-- **Latenz-Ziel:** 1–5 ms End-to-End (Hot-Path)  
-- **Optimierungen:**  
-  – IPC-RPC statt HTTP  
-  – Pre-Signing/Pre-Packing  
-  – Rust/C++-Hot-Path  
-  – Co-Location von Node & Flashbots-Relay  
-- **Node-Setup:** eigener Geth/Erigon Node oder lokaler Fork (Hardhat/Anvil)
+- **Latenzziel < 5 ms**  
+  - Eigener Geth/Erigon-Node (IPC)  
+  - Co-Location mit Flashbots-Relay  
+  - Später Rust/C++-Hot-Path  
+- **Docker & CI/CD**  
+- **Monitoring & Alerting** (Prometheus/Grafana, Telegram Alerts)  
 
-## 6. Advanced Features & Next Steps
+## 6. Tax-Export & Reporting
+- **Trade-Logging** (DB oder Datei)  
+- **Tax-Calculator-Modul**  
+  - CSV/PDF-Export aller Trades mit Fees, Gewinnen/Verlusten  
+  - Länderspezifische Steuer-Rules  
+- **GitHub Action** für monatlichen Steuerreport  
+
+## 7. Advanced Features & Roadmap
 - **Web-Interface** (Next.js/Flask)  
-- **NFT- und Affiliate-System**  
-- **Tax-Export-Modul** (CSV, PDF/JPG)  
+- **NFT- & Affiliate-System**  
 - **Payment-Flow** (Stripe/Gumroad/Krypto)  
 - **Backtesting & Reporting**  
-- **Deployment** in Docker, CI/CD, Monitoring & SLA
+- **Deployment & SLA** (Docker-Compose, Kubernetes, Uptime-Monitoring)  
