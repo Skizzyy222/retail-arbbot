@@ -2,43 +2,48 @@
 
 ## 1. Core-Scanner & Executor
 - **Multi-Chain & Multi-Pair**  
-  - Scannt beliebig viele ERC-20-Paare auf Mainnet, Sepolia und weiteren EVM-Netzen  
+  - Scannt beliebig viele ERC-20-Paare (WETH→Token) auf Mainnet, Sepolia und weiteren EVM-Netzen  
 - **Asynchroner DEX-Scanner**  
-  - Holt Reserves via Web3, berechnet Spreads, löst Alerts aus  
+  - Holt Reserven via Web3, berechnet Spreads, löst Alerts aus  
 - **Flashbots-Executor**  
   - `run_once()` simuliert und sendet Bundles  
   - Gas-Estimation & EIP-1559-Fees  
+  - In-Bundle Gas-Abzug: Kunde zahlt Gas-Kosten aus seinem WETH-Guthaben  
   - Pre-Signing & Pre-Packing für < 5 ms Hot-Path  
 - **Automatischer Fee-Split**  
-  - Leitet z. B. 20 % des Profits an die Bot-Owner-Adresse weiter  
+  - Dynamisch je User-Tier (Free 35 % / Premium 10 %)  
+  - Berechnung & Abzug im selben Flashbots-Bundle  
 
-## 2. Telegram-Bot Integration
-- **Onboarding per /start**  
-  - Generiert Deposit-Adresse, zeigt WETH-Einzahlungsanweisung  
+## 2. Gas-Credit-System
+- **Gas-Credits pro User**  
+  - Jeder neue User startet mit z. B. 5 kostenfreien Bundles  
+  - Pro Bundle wird ein Credit verbraucht  
+- **Refill-Mechanismus**  
+  - Bei WETH-Deposit oder Abo → Credits auf definierte Zahl auffüllen  
+- **Credit-Check im Executor**  
+  - Sendet nur Bundles, wenn Credits > 0, sonst Hinweis an User  
+
+## 3. Telegram-Bot Integration
+- **Onboarding per `/start`**  
+  - Legt User an, generiert Deposit-Adresse (WETH)  
 - **Inline-Buttons & Commands**  
   - ▶️ Start Bot / ⏸️ Stop Bot  
   - ⚙️ Settings: Threshold, Poll-Interval  
-  - 📊 Status: WETH/ETH-Balance, Win-Rate  
+  - 📊 Status: WETH/ETH-Balance, verbleibende Gas-Credits, Win-Rate  
   - 💸 Withdraw  
+  - 🔄 Upgrade: Premium-Abo aktivieren  
 - **Live-Feedback**  
-  - Simulationsergebnisse, Receipts, Low-Balance-Warnungen  
-
-## 3. CEX & Cross-Exchange Arbitrage
-- **Parallel-Scan** von DEX ↔ DEX, DEX ↔ CEX, CEX ↔ CEX  
-- **Spread-Matrix** über alle Kombis  
-- **Auto-Executor**  
-  - DEX↔DEX → Flashbots-Bundle  
-  - DEX↔CEX/CEX↔DEX → CEX-Order + DEX-Swap  
+  - Simulationsergebnisse, Receipts, Low-Balance- oder Credit-Warnungen  
 
 ## 4. Configuration & Secrets-Management
 - **Zentrales `config.yaml`**  
-  - Netzwerke, RPCs, DEX-Factorys, Paare, Thresholds, Poll-Interval  
-  - Executor: Private-Key-Env, Relay-URLs, Fee-Split  
+  - Netzwerke, RPCs, DEX-Factorys, Paare, Threshold, Poll-Interval  
+  - Executor: Private-Key-Env, Relay-URLs, Fee-Split-Defaults  
   - Telegram: Bot-Token-Env, Chat-ID-Env  
-- **Environment-Variablen** für alle Secrets (Private Keys, CEX-API Keys)  
+- **Environment-Variablen** für alle Secrets (Private Keys)  
 
 ## 5. Performance & Infrastruktur
-- **Latenzziel < 5 ms**  
+- **Latenz-Ziel < 5 ms**  
   - Eigener Geth/Erigon-Node (IPC)  
   - Co-Location mit Flashbots-Relay  
   - Später Rust/C++-Hot-Path  
