@@ -1,0 +1,60 @@
+# Technical Goals für DEXArbRadar
+
+## 1. Core-Scanner & Executor
+- **Multi-Chain Support**  
+  – Mainnet & Sepolia (erste Stufe), später beliebige EVM-Netze (Arbitrum, Polygon, …)  
+- **DEX-Scanner**  
+  – Async-Python-Modul, holt Reserves via Web3 (UniswapV2, SushiSwap, …)  
+  – Berechnet Spread für beliebige ERC-20-Paare  
+  – Poll-Interval konfigurierbar (z. B. 5–30 s)  
+- **Flashbots-Executor**  
+  – `run_once()`-Funktion: baut, signiert, simuliert und sendet ein Bundle  
+  – Logging & Error-Handling (Simulation, Bundle-Inklusion)  
+  – Gas-Estimation, EIP-1559 Fees (`baseFeePerGas` + `maxPriorityFeePerGas`)  
+  – Pre-Signing & Pre-Packing (Nonce-Pool, Bundle-Queue) für < 5 ms Hot-Path
+
+## 2. Telegram-Bot Integration
+- **Single Bot** für Scanner + Executor  
+- **Commands**  
+  - `/start_executor` & `/stop_executor`  
+  - `/set_threshold <Prozent>`  
+  - `/set_network <Netzwerk>`  
+  - `/set_address <0x…>`  
+  - `/set_cex_api <exchange> <key> <secret>`  
+  - `/status`, `/menu` (mit Inline-Buttons)  
+- **Feedback**: Simulationsergebnis, Receipt, Übersprungene Trades
+
+## 3. CEX & Cross-Exchange Arbitrage
+- **Parallel-Scan** von bis zu 10 Quellen (DEXe & CEXe) via WebSocket/REST  
+- **Spread-Matrix** aller Kombis (DEX↔DEX, DEX↔CEX, CEX↔CEX)  
+- **Filter** auf nur durch Nutzer autorisierte Exchanges  
+- **Auto-Executor**  
+  – DEX↔DEX → Flashbots-Bundle  
+  – CEX↔DEX oder DEX↔CEX → CEX-Order + DEX-Swap
+
+## 4. Configuration & Keys
+- **Zentrales `config.yaml`**  
+  – `rpc_endpoints`, `networks.default`  
+  – `dex`-List, `pairs`, `threshold_spread`, `poll_interval`  
+  – `telegram.bot_token`, `telegram.chat_id`  
+  – `executor.private_key_env_var`, `relay_urls`, `target_address`, `calldata`, `value`, `max_priority_fee`  
+- **Environment Variables** für Secrets  
+  – `EXECUTOR_PRIV_KEY`, `NETWORK`, `THRESHOLD`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`  
+  – Verschlüsselte Speicherung von CEX-API-Keys (AES-256)
+
+## 5. Performance & Infrastruktur
+- **Latenz-Ziel:** 1–5 ms End-to-End (Hot-Path)  
+- **Optimierungen:**  
+  – IPC-RPC statt HTTP  
+  – Pre-Signing/Pre-Packing  
+  – Rust/C++-Hot-Path  
+  – Co-Location von Node & Flashbots-Relay  
+- **Node-Setup:** eigener Geth/Erigon Node oder lokaler Fork (Hardhat/Anvil)
+
+## 6. Advanced Features & Next Steps
+- **Web-Interface** (Next.js/Flask)  
+- **NFT- und Affiliate-System**  
+- **Tax-Export-Modul** (CSV, PDF/JPG)  
+- **Payment-Flow** (Stripe/Gumroad/Krypto)  
+- **Backtesting & Reporting**  
+- **Deployment** in Docker, CI/CD, Monitoring & SLA
