@@ -1,11 +1,18 @@
+# Sensible Daten
 .env
+wallets/
+
+# Python
 __pycache__/
 *.pyc
+
+# Node/Hardhat
 node_modules/
-hardhat.config.js.*
 artifacts/
 cache/
-".env" 
-.env 
-.env 
-wallets/ 
+.env.local
+
+# VSCode/IDE
+.vscode/
+.idea/
+
