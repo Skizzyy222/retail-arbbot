@@ -1,19 +1,40 @@
+# RPC-Endpoints für alle Netze
 rpc_endpoints:
-  ethereum: "https://eth-mainnet.alchemyapi.io/v2/ulBhde7vN9oTgnyKUgcl5WwM8tw4Osb1"
+  mainnet: "https://eth-mainnet.g.alchemy.com/v2/ulBhde7vN9oTgnyKUgcl5WwM8tw4Osb1"
+  sepolia: "https://eth-sepolia.g.alchemy.com/v2/ulBhde7vN9oTgnyKUgcl5WwM8tw4Osb1"
 
+# Default-Netzwerk, wenn ENV “NETWORK” fehlt
+networks:
+  default: "sepolia"
+
+# DEX-Scanner-Konfiguration
 dexes:
   - name: "UniswapV2"
     factory: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
   - name: "SushiSwap"
     factory: "0xC0AEe478e3658e2610c5F7A4A2E1777CE9e4f2Ac"
 
+# Token-Paare, die du beobachten möchtest
 pairs:
-  - token0: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-    token1: "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"
+  - token0: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"  # USDC
+    token1: "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2"  # WETH
 
-threshold_spread: 0.005
-poll_interval: 5
+threshold_spread: 0.005    # 0.5 % Mindest-Spread für Notification/Executor
+poll_interval: 5          # in Sekunden
 
+# Telegram-Bot für Scanner-Notifications
 telegram:
   bot_token: "7908312734:AAGeeLcUOOz2mU7P-R_jZCBd2qLX0RvJvio"
   chat_id: 732460146
+
+# Executor-Einstellungen (Flashbots)
+executor:
+  private_key_env_var: "EXECUTOR_PRIV_KEY"
+  relay_urls:
+    mainnet: "https://relay.flashbots.net"
+    sepolia:  "https://relay-goerli.flashbots.net"
+    goerli:   "https://relay-goerli.flashbots.net"
+  target_address: "0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF"
+  calldata:      "0x"             # falls du direkt einen Contract aufrufst
+  value:         "0"              # ETH-Betrag in Wei
+  max_priority_fee: 2000000000    # 2 Gwei
