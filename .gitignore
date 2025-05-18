@@ -5,3 +5,6 @@ node_modules/
 hardhat.config.js.*
 artifacts/
 cache/
+".env" 
+.env 
+.env 

@@ -58,6 +58,8 @@ def build_keyboard(user_id):
         [InlineKeyboardButton("🪙 Tokenpaare", callback_data="IGNORE")], *[ [b] for b in pair_buttons ],
         [InlineKeyboardButton("📊 Spread Trigger", callback_data="IGNORE")], [*spread_buttons],
         [trade_button],
+        [InlineKeyboardButton("📈 Hebel (bald verfügbar)", callback_data="IGNORE")]
+
         [InlineKeyboardButton("📋 Status anzeigen", callback_data="STATUS")]
     ]
     return InlineKeyboardMarkup(keyboard)
