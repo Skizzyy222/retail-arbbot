@@ -1,10 +1,15 @@
 import asyncio
 import os
+import sys
 import logging
 from dotenv import load_dotenv
 from web3 import Web3
-from shared_state import user_state
 import yaml
+
+# Telegram shared_state laden
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'telegrambot')))
+from shared_state import user_state
+
 
 # --- ENV & CONFIG ---
 load_dotenv()

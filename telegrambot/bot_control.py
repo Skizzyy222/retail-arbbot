@@ -32,36 +32,35 @@ def build_keyboard(user_id):
     # Pair Buttons
     pair_buttons = [
         InlineKeyboardButton(
-            f"{'✅' if idx in selected_pairs else '☐'} {p.get('name', p['token0'][:6] + '/' + p['token1'][:6])}",
+            f"{'✅' if idx in selected_pairs else '☐'} {p.get('name', f'{p['token0'][:6]}/{p['token1'][:6]}')}",
             callback_data=f"PAIR::{idx}"
         ) for idx, p in enumerate(CONFIG.get("pairs", []))
     ]
 
-    # Spread Buttons
-    spreads = ["0.5", "1.0", "2.0"]
-    spread_buttons = [
-        InlineKeyboardButton(
-            f"{'✅' if s == spread else '☐'} {s}%",
-            callback_data=f"SPREAD::{s}"
-        ) for s in spreads
-    ]
-    spread_buttons.append(InlineKeyboardButton("✏️ Custom", callback_data="SPREAD::CUSTOM"))
+    # Spread Buttons mit exklusiver Auswahl
+    spread_buttons = []
+    for s in ["0.5", "1.0", "2.0"]:
+        is_selected = (s == spread)
+        spread_buttons.append(
+            InlineKeyboardButton(f"{'✅' if is_selected else '☐'} {s}%", callback_data=f"SPREAD::{s}")
+        )
+    is_custom = spread not in ["0.5", "1.0", "2.0"] and not str(spread).startswith("CUSTOM")
+    spread_buttons.append(InlineKeyboardButton(f"{'✅' if is_custom else '☐'} Custom", callback_data="SPREAD::CUSTOM"))
 
-    # Autotrade Button
     trade_button = InlineKeyboardButton(
         f"🚀 Autotrade {'✅ ON' if autotrade else '❌ OFF'}",
         callback_data="AUTOTRADE::TOGGLE"
     )
 
     keyboard = [
-        [InlineKeyboardButton("💱 DEX Auswahl", callback_data="IGNORE")], *[ [b] for b in dex_buttons ],
-        [InlineKeyboardButton("🪙 Tokenpaare", callback_data="IGNORE")], *[ [b] for b in pair_buttons ],
+        [InlineKeyboardButton("💱 DEX Auswahl", callback_data="IGNORE")], *[[b] for b in dex_buttons],
+        [InlineKeyboardButton("🪙 Tokenpaare", callback_data="IGNORE")], *[[b] for b in pair_buttons],
         [InlineKeyboardButton("📊 Spread Trigger", callback_data="IGNORE")], [*spread_buttons],
         [trade_button],
-        [InlineKeyboardButton("📈 Hebel (bald verfügbar)", callback_data="IGNORE")]
-
+        [InlineKeyboardButton("📈 Hebel (bald verfügbar)", callback_data="IGNORE")],
         [InlineKeyboardButton("📋 Status anzeigen", callback_data="STATUS")]
     ]
+
     return InlineKeyboardMarkup(keyboard)
 
 # --- Commands ---
@@ -80,7 +79,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     parts = query.data.split("::")
     if len(parts) != 2:
-        return  # z. B. bei Buttons wie "IGNORE" oder "STATUS"
+        return
     action, value = parts
 
     if action == "DEX":
@@ -104,8 +103,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif action == "SPREAD":
         if value == "CUSTOM":
-            await query.message.reply_text("Bitte gib den gewünschten Spread in % an (z. B. 0.8):")
+            await query.message.reply_text("Bitte gib deinen gewünschten Spread in % an (z. B. 0.8):")
             context.user_data["awaiting_spread"] = True
+            state["spread"] = "CUSTOM_PENDING"
             return
         else:
             state["spread"] = value
@@ -122,17 +122,22 @@ async def handle_custom_spread(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = update.effective_user.id
     if context.user_data.get("awaiting_spread"):
         try:
-            val = str(float(update.message.text))
-            user_state[user_id]["spread"] = val
-            await update.message.reply_text(f"Spread gesetzt auf {val}%")
-        except ValueError:
-            await update.message.reply_text("Ungültiger Wert. Bitte gib eine Zahl ein.")
+            val = float(update.message.text)
+            if not (0.1 <= val <= 10.0):
+                raise ValueError("Spread außerhalb des erlaubten Bereichs.")
+
+            state = user_state[user_id]
+            state["spread"] = str(val)
+            await update.message.reply_text(f"✅ Spread gesetzt auf {val}%")
+        except Exception:
+            user_state[user_id]["spread"] = "1.0"  # fallback
+            await update.message.reply_text("❌ Ungültiger Wert. Bitte gib eine Zahl zwischen 0.1 und 10.0 ein.")
         context.user_data["awaiting_spread"] = False
 
 async def show_status(query, state):
     dexes = ", ".join(state["dexes"] or ["(keine)"])
     pairs = ", ".join([
-        CONFIG['pairs'][i].get('name', f"{CONFIG['pairs'][i]['token0'][:6]}/{CONFIG['pairs'][i]['token1'][:6]}")
+        f"{CONFIG['pairs'][i].get('name', CONFIG['pairs'][i]['token0'][:6] + '/' + CONFIG['pairs'][i]['token1'][:6])}"
         for i in state["pairs"]
     ]) or "(keine)"
     spread = state["spread"]
@@ -165,6 +170,7 @@ def main():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     main()
+
 
 
 
