@@ -1,0 +1,54 @@
+services:
+  geth:
+    image: ethereum/client-go:stable
+    command:
+      - --sepolia
+      - --http
+      - --http.api=eth,net,web3,personal
+      - --ws
+      - --authrpc.addr=0.0.0.0
+      - --authrpc.port=8551
+      - --authrpc.vhosts=*
+      - --authrpc.jwtsecret=/geth/jwtsecret/jwtsecret
+      - --datadir=/geth/data
+    volumes:
+      - ./geth-data:/geth/data
+      - ./jwtsecret/jwtsecret:/geth/jwtsecret/jwtsecret:ro
+    ports:
+      - "8545:8545"
+      - "8551:8551"
+      - "30303:30303"
+      - "30303:30303/udp"
+    networks:
+      - eth
+
+  lighthouse:
+    image: sigp/lighthouse:latest
+    command:
+      - lighthouse
+      - bn
+      - --network=sepolia
+      - --execution-endpoint=http://geth:8551
+      - --execution-jwt=/geth/jwtsecret/jwtsecret
+      - --checkpoint-sync-url=https://sync-sepolia.beaconcha.in/
+    volumes:
+      - ./lighthouse-data:/root/.lighthouse
+      - ./jwtsecret:/geth/jwtsecret:ro
+    depends_on:
+      - geth
+    networks:
+      - eth
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - geth
+    volumes:
+      - .:/app
+    networks:
+      - eth
+
+networks:
+  eth:

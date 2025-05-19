@@ -1,19 +1,39 @@
 import logging
 import yaml
 import os
+import json
+from wallets.wallet_manager import get_or_create_wallet
 from dotenv import load_dotenv
+import logging
+import yaml
+import os
+import json
+from dotenv import load_dotenv
+from web3 import Web3
+from eth_account import Account
+from wallets.wallet_manager import get_or_create_wallet
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.constants import ParseMode
+from telegram.helpers import escape_markdown
 from shared_state import user_state
 
-# --- Lade Umgebungsvariablen ---
+# --- Umgebungsvariablen laden ---
 load_dotenv()
+
+# --- Web3 Setup für lokale Sepolia Node ---
+RPC_URL = os.getenv("RPC_URL_SEPOLIA", "http://localhost:8545")
+web3 = Web3(Web3.HTTPProvider(RPC_URL))
+
+# --- Developer Wallet (für Withdraw/Testzahlungen) ---
+DEV_PRIVATE_KEY = os.getenv("DEV_PRIVATE_KEY")
+dev_account = Account.from_key(DEV_PRIVATE_KEY)
 
 # --- Konfiguration laden ---
 with open("config.yaml", encoding="utf-8") as f:
     CONFIG = yaml.safe_load(f)
 
-# --- Helper: Callback-Keyboard erstellen ---
+# --- Inline-UI bauen ---
 def build_keyboard(user_id):
     state = user_state.get(user_id, {})
     selected_dexes = state.get("dexes", set())
@@ -21,7 +41,6 @@ def build_keyboard(user_id):
     autotrade = state.get("autotrade", False)
     spread = state.get("spread", "1.0")
 
-    # DEX Buttons
     dex_buttons = [
         InlineKeyboardButton(
             f"{'✅' if d['name'] in selected_dexes else '☐'} {d['name']}",
@@ -29,15 +48,16 @@ def build_keyboard(user_id):
         ) for d in CONFIG.get("dexes", [])
     ]
 
-    # Pair Buttons
     pair_buttons = [
-        InlineKeyboardButton(
-            f"{'✅' if idx in selected_pairs else '☐'} {p.get('name', f'{p['token0'][:6]}/{p['token1'][:6]}')}",
-            callback_data=f"PAIR::{idx}"
-        ) for idx, p in enumerate(CONFIG.get("pairs", []))
-    ]
+    InlineKeyboardButton(
+        f"{'✅' if idx in selected_pairs else '☐'} " +
+        p.get("name", f"{p['token0'][:6]}/{p['token1'][:6]}"),
+        callback_data=f"PAIR::{idx}"
+    )
+    for idx, p in enumerate(CONFIG.get("pairs", []))
+]
 
-    # Spread Buttons mit exklusiver Auswahl
+
     spread_buttons = []
     for s in ["0.5", "1.0", "2.0"]:
         is_selected = (s == spread)
@@ -63,12 +83,73 @@ def build_keyboard(user_id):
 
     return InlineKeyboardMarkup(keyboard)
 
-# --- Commands ---
+# --- /start Command ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_state.setdefault(user_id, {"dexes": set(), "pairs": set(), "autotrade": False, "spread": "1.0"})
-    await update.message.reply_text("Willkommen! Konfiguriere deinen Scanner:",
-                                    reply_markup=build_keyboard(user_id))
+    address, _ = get_or_create_wallet(user_id)
+    user_state.setdefault(user_id, {
+        "dexes": set(),
+        "pairs": set(),
+        "autotrade": False,
+        "spread": "1.0"
+    })
+    await update.message.reply_text(
+        f"👋 Willkommen beim Arbitrage-Bot!\n"
+        f"👛 Deine Wallet-Adresse:\n`{address}`\n\n"
+        "Nutze die Buttons unten, um deine Scanner-Einstellungen zu konfigurieren:",
+        reply_markup=build_keyboard(user_id),
+        parse_mode="Markdown"
+    )
+
+# --- /wallet Command ---
+async def wallet_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    wallet_path = os.path.join("wallets", f"{user_id}.json")
+
+    try:
+        with open(wallet_path, "r") as f:
+            wallet_data = json.load(f)
+        address = Web3.to_checksum_address(wallet_data["address"])
+        eth_balance = web3.eth.get_balance(address)
+        eth_display = web3.from_wei(eth_balance, "ether")
+    except:
+        await update.message.reply_text("❌ Wallet nicht gefunden. Starte mit /start.")
+        return
+
+    escaped_address = escape_markdown(address, version=2)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Adresse kopieren", callback_data=f"COPY::{address}")],
+        [InlineKeyboardButton("📤 ETH senden (Dev)", callback_data="WITHDRAW::NOW")]
+    ])
+
+    msg = (
+        f"*💼 Deine Wallet:*\n"
+        f"`{escaped_address}`\n"
+        f"💸 *ETH Balance:* {eth_display} ETH"
+    )
+
+    await update.message.reply_text(msg, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN_V2)
+
+# --- ETH Transfer (Dev → User) ---
+async def send_eth_to_user(user_id):
+    wallet_path = os.path.join("wallets", f"{user_id}.json")
+    with open(wallet_path, "r") as f:
+        wallet_data = json.load(f)
+    recipient = Web3.to_checksum_address(wallet_data["address"])
+
+    nonce = web3.eth.get_transaction_count(dev_account.address)
+    tx = {
+        "to": recipient,
+        "value": web3.to_wei(0.01, "ether"),
+        "gas": 21000,
+        "gasPrice": web3.eth.gas_price,
+        "nonce": nonce,
+        "chainId": 11155111
+    }
+
+    signed_tx = web3.eth.account.sign_transaction(tx, private_key=DEV_PRIVATE_KEY)
+    tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
+    return web3.to_hex(tx_hash)
 
 # --- Callback Handler ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -116,8 +197,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "STATUS":
         return await show_status(query, state)
 
+    elif action == "COPY":
+        await query.message.reply_text(f"📋 Adresse kopiert:\n`{value}`", parse_mode="Markdown")
+
+    elif action == "WITHDRAW":
+        tx_hash = await send_eth_to_user(user_id)
+        await query.message.reply_text(
+            f"📤 0.01 Sepolia ETH gesendet!\n🔗 TX Hash: `{tx_hash}`",
+            parse_mode="Markdown"
+        )
+
     await query.edit_message_reply_markup(reply_markup=build_keyboard(user_id))
 
+# --- Custom Spread ---
 async def handle_custom_spread(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if context.user_data.get("awaiting_spread"):
@@ -125,16 +217,29 @@ async def handle_custom_spread(update: Update, context: ContextTypes.DEFAULT_TYP
             val = float(update.message.text)
             if not (0.1 <= val <= 10.0):
                 raise ValueError("Spread außerhalb des erlaubten Bereichs.")
-
             state = user_state[user_id]
             state["spread"] = str(val)
             await update.message.reply_text(f"✅ Spread gesetzt auf {val}%")
         except Exception:
-            user_state[user_id]["spread"] = "1.0"  # fallback
+            user_state[user_id]["spread"] = "1.0"
             await update.message.reply_text("❌ Ungültiger Wert. Bitte gib eine Zahl zwischen 0.1 und 10.0 ein.")
         context.user_data["awaiting_spread"] = False
 
+# --- Status anzeigen ---
 async def show_status(query, state):
+    user_id = query.from_user.id
+    wallet_path = os.path.join("wallets", f"{user_id}.json")
+
+    try:
+        with open(wallet_path, "r") as f:
+            wallet_data = json.load(f)
+        address = Web3.to_checksum_address(wallet_data["address"])
+        eth_balance = web3.eth.get_balance(address)
+        eth_display = web3.from_wei(eth_balance, "ether")
+    except:
+        address = "(nicht gefunden)"
+        eth_display = "Fehler"
+
     dexes = ", ".join(state["dexes"] or ["(keine)"])
     pairs = ", ".join([
         f"{CONFIG['pairs'][i].get('name', CONFIG['pairs'][i]['token0'][:6] + '/' + CONFIG['pairs'][i]['token1'][:6])}"
@@ -142,8 +247,12 @@ async def show_status(query, state):
     ]) or "(keine)"
     spread = state["spread"]
     auto = "Aktiv" if state["autotrade"] else "Inaktiv"
+
     msg = (
         f"\U0001F9FE *Deine Konfiguration:*\n"
+        f"📛 Wallet: `{address}`\n"
+        f"💸 ETH (Sepolia lokal): {eth_display} ETH\n"
+        f"\n"
         f"DEXes: {dexes}\n"
         f"Paare: {pairs}\n"
         f"Spread: {spread}%\n"
@@ -151,7 +260,7 @@ async def show_status(query, state):
     )
     await query.message.reply_text(msg, parse_mode="Markdown")
 
-# --- Bot Start ---
+# --- Bot starten ---
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -161,6 +270,7 @@ def main():
     app = Application.builder().token(token).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("wallet", wallet_info))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_spread))
 
@@ -170,7 +280,4 @@ def main():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     main()
-
-
-
 
