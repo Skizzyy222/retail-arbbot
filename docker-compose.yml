@@ -9,11 +9,11 @@ services:
       - --authrpc.addr=0.0.0.0
       - --authrpc.port=8551
       - --authrpc.vhosts=*
-      - --authrpc.jwtsecret=/geth/jwtsecret/jwtsecret
+      - --authrpc.jwtsecret=/geth/jwtsecret/jwt.hex
       - --datadir=/geth/data
     volumes:
       - ./geth-data:/geth/data
-      - ./jwtsecret/jwtsecret:/geth/jwtsecret/jwtsecret:ro
+      - ./jwtsecret:/geth/jwtsecret
     ports:
       - "8545:8545"
       - "8551:8551"
@@ -29,11 +29,16 @@ services:
       - bn
       - --network=sepolia
       - --execution-endpoint=http://geth:8551
-      - --execution-jwt=/geth/jwtsecret/jwtsecret
-      - --checkpoint-sync-url=https://sync-sepolia.beaconcha.in/
+      - --execution-jwt=/geth/jwtsecret/jwt.hex
+      - --checkpoint-sync-url=https://sepolia.checkpoint-sync.ethpandaops.io/
+      - --http
     volumes:
       - ./lighthouse-data:/root/.lighthouse
       - ./jwtsecret:/geth/jwtsecret:ro
+    ports:
+      - "9000:9000"     
+      - "9001:9001/udp"
+
     depends_on:
       - geth
     networks:
@@ -51,4 +56,9 @@ services:
       - eth
 
 networks:
-  eth:
+  eth: {}
+
+
+
+
+
