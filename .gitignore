@@ -16,3 +16,17 @@ cache/
 .vscode/
 .idea/
 
+# Geth / Lighthouse data
+geth-data/
+lighthouse-data/
+
+# Python cache (falls vorhanden)
+__pycache__/
+*.pyc
+
+# Sonstiges
+*.log
+*.ldb
+*.bak
+*.lock
+
