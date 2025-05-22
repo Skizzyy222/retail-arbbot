@@ -21,6 +21,7 @@ geth-data/
 lighthouse-data/
 geth/
 root/.lighthouse
+jwtsecret
 
 # Python cache (falls vorhanden)
 __pycache__/
