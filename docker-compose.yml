@@ -1,62 +1,31 @@
 services:
-  geth:
-    image: ethereum/client-go:stable
-    command:
-      - --sepolia
-      - --http
-      - --http.api=eth,net,web3,personal
-      - --ws
-      - --authrpc.addr=0.0.0.0
-      - --authrpc.port=8551
-      - --authrpc.vhosts=*
-      - --authrpc.jwtsecret=/geth/jwtsecret/jwt.hex
-      - --datadir=/geth/data
-    volumes:
-      - ./geth-data:/geth/data
-      - ./jwtsecret:/geth/jwtsecret
-    ports:
-      - "8545:8545"
-      - "8551:8551"
-      - "30303:30303"
-      - "30303:30303/udp"
-    networks:
-      - eth
-
-  lighthouse:
-    image: sigp/lighthouse:latest
-    command:
-      - lighthouse
-      - bn
-      - --network=sepolia
-      - --execution-endpoint=http://geth:8551
-      - --execution-jwt=/geth/jwtsecret/jwt.hex
-      - --checkpoint-sync-url=https://sepolia.checkpoint-sync.ethpandaops.io/
-      - --http
-    volumes:
-      - ./lighthouse-data:/root/.lighthouse
-      - ./jwtsecret:/geth/jwtsecret:ro
-    ports:
-      - "9000:9000"     
-      - "9001:9001/udp"
-
-    depends_on:
-      - geth
-    networks:
-      - eth
-
   bot:
     build:
       context: .
       dockerfile: Dockerfile
-    depends_on:
-      - geth
     volumes:
       - .:/app
+    env_file:
+      - .env
+    networks:
+      - eth
+
+  scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m scanner.async_scanner
+    volumes:
+      - .:/app
+    env_file:
+      - .env
     networks:
       - eth
 
 networks:
   eth: {}
+
+
 
 
 

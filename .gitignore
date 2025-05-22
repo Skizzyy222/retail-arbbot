@@ -19,14 +19,19 @@ cache/
 # Geth / Lighthouse data
 geth-data/
 lighthouse-data/
+geth/
+root/.lighthouse
 
 # Python cache (falls vorhanden)
 __pycache__/
 *.pyc
 
-# Sonstiges
+# Logs & temp files
 *.log
 *.ldb
 *.bak
 *.lock
 
+# OS-specific
+.DS_Store
+Thumbs.db
