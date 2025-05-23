@@ -33,6 +33,10 @@ __pycache__/
 *.bak
 *.lock
 
+# Ignoriere alle Trade-Logs
+tradelog_*.json
+trades/
+
 # OS-specific
 .DS_Store
 Thumbs.db

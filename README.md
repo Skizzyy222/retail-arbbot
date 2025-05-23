@@ -117,3 +117,4 @@ Später kann das Projekt auf beliebige EVM-Chains erweitert werden.
 Aktuell ist der Fokus: Strategien, Gas-Tests & Telegram-UI MVP.
 
 Für Mainnet/Arbitrum: Eigene Nodes/Provider konfigurieren (siehe .env).
+"# retail-arbbot" 

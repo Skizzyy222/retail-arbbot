@@ -2,6 +2,7 @@ import logging
 import yaml
 import os
 import json
+import asyncio
 from wallets.wallet_manager import get_or_create_wallet
 from dotenv import load_dotenv
 from web3 import Web3
@@ -10,23 +11,18 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 from shared_state import user_state
+from trade_executor import execute_trade
 
 # --- Umgebungsvariablen laden ---
 load_dotenv()
-
-# --- Web3 Setup für Sepolia Node ---
 RPC_URL = os.getenv("RPC_URL_SEPOLIA", "http://localhost:8545")
 web3 = Web3(Web3.HTTPProvider(RPC_URL))
-
-# --- Developer Wallet (für Withdraw/Testzahlungen) ---
 DEV_PRIVATE_KEY = os.getenv("DEV_PRIVATE_KEY")
 dev_account = Account.from_key(DEV_PRIVATE_KEY)
 
-# --- Konfiguration laden ---
 with open("config.yaml", encoding="utf-8") as f:
     CONFIG = yaml.safe_load(f)
 
-# --- Inline-UI bauen ---
 def build_keyboard(user_id):
     state = user_state.get(user_id, {})
     selected_dexes = state.get("dexes", set())
@@ -60,8 +56,10 @@ def build_keyboard(user_id):
     spread_buttons.append(InlineKeyboardButton(f"{'✅' if is_custom else '☐'} Custom", callback_data="SPREAD::CUSTOM"))
 
     trade_button = InlineKeyboardButton(
-        f"🚀 Autotrade {'✅ ON' if autotrade else '❌ OFF'}",
-        callback_data="AUTOTRADE::TOGGLE"
+        f"🚀 Trade jetzt!", callback_data="TRADE::NOW"
+    )
+    autotrade_button = InlineKeyboardButton(
+        f"⚡ Autotrade {'✅ ON' if autotrade else '❌ OFF'}", callback_data="AUTOTRADE::TOGGLE"
     )
 
     keyboard = [
@@ -69,13 +67,13 @@ def build_keyboard(user_id):
         [InlineKeyboardButton("🪙 Tokenpaare", callback_data="IGNORE")], *[[b] for b in pair_buttons],
         [InlineKeyboardButton("📊 Spread Trigger", callback_data="IGNORE")], [*spread_buttons],
         [trade_button],
+        [autotrade_button],
         [InlineKeyboardButton("📈 Hebel (bald verfügbar)", callback_data="IGNORE")],
         [InlineKeyboardButton("📋 Status anzeigen", callback_data="STATUS")]
     ]
 
     return InlineKeyboardMarkup(keyboard)
 
-# --- /start Command ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     address, _ = get_or_create_wallet(user_id)
@@ -93,7 +91,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML
     )
 
-# --- /wallet Command ---
 async def wallet_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     wallet_path = os.path.join("wallets", f"{user_id}.json")
@@ -121,7 +118,6 @@ async def wallet_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
-# --- ETH Transfer (Dev → User) ---
 async def send_eth_to_user(user_id):
     wallet_path = os.path.join("wallets", f"{user_id}.json")
     with open(wallet_path, "r") as f:
@@ -141,10 +137,8 @@ async def send_eth_to_user(user_id):
     signed_tx = web3.eth.account.sign_transaction(tx, private_key=DEV_PRIVATE_KEY)
     tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
     tx_hash_hex = web3.to_hex(tx_hash)
-
     return tx_hash_hex
 
-# --- Callback Handler ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -187,6 +181,42 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "AUTOTRADE":
         state["autotrade"] = not state["autotrade"]
 
+    elif action == "TRADE":
+        # Hole das aktuell gewählte Paar, Dex etc.
+        if not state["pairs"] or not state["dexes"]:
+            await query.message.reply_text("❌ Bitte wähle mindestens 1 Paar und 2 DEX aus!", parse_mode=ParseMode.HTML)
+            return
+
+        # Für Demo nehmen wir das erste ausgewählte Paar und die ersten zwei DEXes:
+        pair_idx = next(iter(state["pairs"]))
+        dex_names = list(state["dexes"])
+        pair = CONFIG["pairs"][pair_idx]
+        dex_a = [d for d in CONFIG["dexes"] if d["name"] == dex_names[0]][0]["router"]
+        dex_b = [d for d in CONFIG["dexes"] if d["name"] == dex_names[1]][0]["router"]
+        token0 = pair["token0"]
+        token1 = pair["token1"]
+
+        # Telegram-Callback als Lambda für Executor:
+        async def telegram_callback(uid, msg):
+            await context.bot.send_message(chat_id=uid, text=msg, parse_mode="HTML")
+        loop = asyncio.get_event_loop()
+        # Starte Executor im Threadpool, weil synchronous!
+        loop.run_in_executor(
+            None,
+            execute_trade,
+            user_id,
+            token0,
+            token1,
+            dex_a,
+            dex_b,
+            1,
+            lambda uid, msg: asyncio.run_coroutine_threadsafe(
+                context.bot.send_message(chat_id=uid, text=msg, parse_mode="HTML"),
+                loop
+            )
+        )
+        await query.message.reply_text("🚦 Trade wird ausgeführt...", parse_mode=ParseMode.HTML)
+
     elif action == "STATUS":
         return await show_status(query, state)
 
@@ -202,7 +232,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_reply_markup(reply_markup=build_keyboard(user_id))
 
-# --- Custom Spread ---
 async def handle_custom_spread(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if context.user_data.get("awaiting_spread"):
@@ -218,7 +247,6 @@ async def handle_custom_spread(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("❌ Ungültiger Wert. Bitte gib eine Zahl zwischen 0.1 und 10.0 ein.", parse_mode=ParseMode.HTML)
         context.user_data["awaiting_spread"] = False
 
-# --- Status anzeigen ---
 async def show_status(query, state):
     user_id = query.from_user.id
     wallet_path = os.path.join("wallets", f"{user_id}.json")
@@ -253,7 +281,6 @@ async def show_status(query, state):
     )
     await query.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
-# --- Bot starten ---
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -261,19 +288,10 @@ def main():
         return
 
     app = Application.builder().token(token).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("wallet", wallet_info))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_spread))
-
-    print("🤖 Bot läuft...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    main()
-
 
     print("🤖 Bot läuft...")
     app.run_polling()

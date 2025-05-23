@@ -1,0 +1,16 @@
+[
+  {
+    "timestamp": "2025-05-22T18:31:28.009456Z",
+    "pair": "0x4200000000000000000000000000000000000006/0x...",
+    "dex_a": "0x...",
+    "dex_b": "0x...",
+    "leverage": 1,
+    "amount_in": 0.001,
+    "profit": null,
+    "gas_used": null,
+    "gas_price_gwei": 5,
+    "tx_hashes": [],
+    "status": "FAILED",
+    "error": "when sending a str, it must be a hex string. Got: '0x...'"
+  }
+]

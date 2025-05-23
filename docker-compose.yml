@@ -22,6 +22,18 @@ services:
     networks:
       - eth
 
+  executor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python trade_executor.py
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    networks:
+      - eth
+
 networks:
   eth: {}
 
