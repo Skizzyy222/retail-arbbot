@@ -2,6 +2,7 @@
 .env
 wallets/
 
+
 # Python
 __pycache__/
 *.pyc

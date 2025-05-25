@@ -10,7 +10,6 @@ import yaml
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'telegrambot')))
 from shared_state import user_state
 
-
 # --- ENV & CONFIG ---
 load_dotenv()
 NETWORK = os.getenv("NETWORK", "sepolia")
@@ -35,8 +34,8 @@ ROUTER_ABI = [
     }
 ]
 
-# --- Preis abrufen ---
-async def get_price(router_address, token0, token1):
+# --- Preis abrufen (async, aber via Thread wegen web3 call) ---
+def get_price(router_address, token0, token1):
     try:
         router = web3.eth.contract(address=Web3.to_checksum_address(router_address), abi=ROUTER_ABI)
         amount_in = Web3.to_wei(1, 'ether')  # 1 Token0
@@ -52,8 +51,43 @@ def calculate_spread(a, b):
         return 0
     return abs(a - b) / min(a, b) * 100
 
+# --- Router-Adresse holen (KORRIGIERT: router, nicht factory) ---
+def get_router(name):
+    for dex in CONFIG['dexes']:
+        if dex['name'] == name:
+            return dex['router']
+    return None
+
+# --- Trade auslösen inkl. Telegram-Callback (Bot Notification) ---
+def trigger_trade(user_id, token0, token1, dex_a, dex_b, spread, bot_notify=None):
+    print(f"🔥 Trade ausgelöst für User {user_id}: {token0[:6]}/{token1[:6]} von {dex_a} → {dex_b} ({spread:.2f}%)")
+    # Importiere execute_trade nur hier (Importzyklen vermeiden)
+    from trade_executor import execute_trade
+
+    router_a = get_router(dex_a)
+    router_b = get_router(dex_b)
+
+    # Lambda zum Telegram-Benachrichtigen
+    # (bot_notify ist ein async-callback, z.B. vom Bot)
+    def notify(uid, msg):
+        if bot_notify:
+            asyncio.run_coroutine_threadsafe(
+                bot_notify(uid, msg), asyncio.get_event_loop()
+            )
+        else:
+            print(f"[{uid}] {msg}")
+
+    # In eigenem Thread ausführen (executor kann blocken)
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(
+        None,
+        execute_trade,
+        user_id, token0, token1, router_a, router_b, 1,
+        notify
+    )
+
 # --- Scanner Loop ---
-async def scan_loop():
+async def scan_loop(bot_notify=None):
     print("🚀 Async High-Speed Scanner gestartet...")
     while True:
         tasks = []
@@ -81,20 +115,22 @@ async def scan_loop():
                     for j, b in enumerate(dex_names) if i < j
                 ]
 
-                price_tasks = {
-                    (a, b): (
-                        asyncio.to_thread(get_price, get_router(a), token0, token1),
-                        asyncio.to_thread(get_price, get_router(b), token0, token1)
-                    )
-                    for a, b in combinations
-                }
+                # Preise für alle DEXe gleichzeitig holen (async)
+                price_tasks = []
+                for a, b in combinations:
+                    ra = get_router(a)
+                    rb = get_router(b)
+                    if not ra or not rb:
+                        continue
+                    # Threaded, da Web3 nicht async
+                    price_tasks.append((
+                        (a, b),
+                        asyncio.to_thread(get_price, ra, token0, token1),
+                        asyncio.to_thread(get_price, rb, token0, token1)
+                    ))
 
-                resolved = await asyncio.gather(*[
-                    asyncio.gather(a_task, b_task)
-                    for a_task, b_task in price_tasks.values()
-                ])
-
-                for ((dex_a, dex_b), (price_a, price_b)) in zip(price_tasks.keys(), resolved):
+                for (dex_a, dex_b), t1, t2 in price_tasks:
+                    price_a, price_b = await asyncio.gather(t1, t2)
                     spread = calculate_spread(price_a, price_b)
                     if spread >= spread_limit and spread > best_spread:
                         best_spread = spread
@@ -104,23 +140,11 @@ async def scan_loop():
                     dex_a, dex_b = best_combo
                     logging.info(f"[User {user_id}] Best Spread {best_spread:.2f}% bei {name} zwischen {dex_a} und {dex_b}")
                     if autotrade:
-                        trigger_trade(user_id, token0, token1, dex_a, dex_b)
+                        trigger_trade(user_id, token0, token1, dex_a, dex_b, best_spread, bot_notify=bot_notify)
 
-        await asyncio.sleep(1)
+        await asyncio.sleep(5)  # Etwas längeres Intervall, damit Sepolia-Rate-Limits nicht greifen
 
-# --- Router-Adresse holen ---
-def get_router(name):
-    for dex in CONFIG['dexes']:
-        if dex['name'] == name:
-            return dex['factory']  # Ggf. Router statt Factory eintragen
-    return None
-
-# --- Trade auslösen ---
-def trigger_trade(user_id, token0, token1, dex_a, dex_b):
-    print(f"🔥 Trade ausgelöst für User {user_id}: {token0[:6]}/{token1[:6]} von {dex_a} → {dex_b}")
-    # executor.execute(user_id, ...)
-
-# --- Main ---
+# --- Main für Standalone-Test ---
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     asyncio.run(scan_loop())

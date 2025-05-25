@@ -46,14 +46,26 @@ def build_keyboard(user_id):
         for idx, p in enumerate(CONFIG.get("pairs", []))
     ]
 
+    spread_options = ["0.5", "1.0", "2.0"]
     spread_buttons = []
-    for s in ["0.5", "1.0", "2.0"]:
-        is_selected = (s == spread)
+    if spread == "CUSTOM_PENDING":
+        for s in spread_options:
+            spread_buttons.append(
+                InlineKeyboardButton(f"☐ {s}%", callback_data=f"SPREAD::{s}")
+            )
         spread_buttons.append(
-            InlineKeyboardButton(f"{'✅' if is_selected else '☐'} {s}%", callback_data=f"SPREAD::{s}")
+            InlineKeyboardButton("✅ Custom", callback_data="SPREAD::CUSTOM")
         )
-    is_custom = spread not in ["0.5", "1.0", "2.0"] and not str(spread).startswith("CUSTOM")
-    spread_buttons.append(InlineKeyboardButton(f"{'✅' if is_custom else '☐'} Custom", callback_data="SPREAD::CUSTOM"))
+    else:
+        for s in spread_options:
+            is_selected = (str(spread) == s)
+            spread_buttons.append(
+                InlineKeyboardButton(f"{'✅' if is_selected else '☐'} {s}%", callback_data=f"SPREAD::{s}")
+            )
+        is_custom = not str(spread) in spread_options
+        spread_buttons.append(
+            InlineKeyboardButton(f"{'✅' if is_custom else '☐'} Custom", callback_data="SPREAD::CUSTOM")
+        )
 
     trade_button = InlineKeyboardButton(
         f"🚀 Trade jetzt!", callback_data="TRADE::NOW"
@@ -83,13 +95,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "autotrade": False,
         "spread": "1.0"
     })
-    await update.message.reply_text(
+
+    msg = await update.message.reply_text(
         f"👋 <b>Willkommen beim Arbitrage-Bot!</b>\n"
         f"👛 <b>Deine Wallet-Adresse:</b>\n<code>{address}</code>\n\n"
         f"Nutze die Buttons unten, um deine Scanner-Einstellungen zu konfigurieren:",
         reply_markup=build_keyboard(user_id),
         parse_mode=ParseMode.HTML
     )
+    context.user_data["menu_message_id"] = msg.message_id
 
 async def wallet_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -147,15 +161,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     parts = query.data.split("::")
     if len(parts) != 2:
+        if query.data == "STATUS":
+            return await show_status(query, state)
         return
+
     action, value = parts
+
+    menu_message_id = context.user_data.get("menu_message_id")
+    chat_id = query.message.chat_id
+
+    notification_text = None
 
     if action == "DEX":
         if value in state["dexes"]:
             if len(state["dexes"]) > 2:
                 state["dexes"].remove(value)
             else:
-                await query.message.reply_text("❗ Mindestens zwei DEX müssen ausgewählt bleiben.", parse_mode=ParseMode.HTML)
+                notification_text = "❗ Mindestens zwei DEX müssen ausgewählt bleiben."
         else:
             state["dexes"].add(value)
 
@@ -165,75 +187,86 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(state["pairs"]) > 1:
                 state["pairs"].remove(i)
             else:
-                await query.message.reply_text("❗ Mindestens ein Tokenpaar muss ausgewählt bleiben.", parse_mode=ParseMode.HTML)
+                notification_text = "❗ Mindestens ein Tokenpaar muss ausgewählt bleiben."
         else:
             state["pairs"].add(i)
 
     elif action == "SPREAD":
         if value == "CUSTOM":
-            await query.message.reply_text("Bitte gib deinen gewünschten Spread in % an (z.B. 0.8):", parse_mode=ParseMode.HTML)
-            context.user_data["awaiting_spread"] = True
             state["spread"] = "CUSTOM_PENDING"
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=menu_message_id,
+                text="Bitte gib deinen gewünschten Spread in % an (z.B. 0.8):",
+                reply_markup=build_keyboard(user_id),
+                parse_mode=ParseMode.HTML
+            )
+            context.user_data["awaiting_spread"] = True
             return
         else:
             state["spread"] = value
+            notification_text = f"✅ Spread gesetzt auf {value}%"
 
     elif action == "AUTOTRADE":
         state["autotrade"] = not state["autotrade"]
+        notification_text = f"Autotrade {'aktiviert' if state['autotrade'] else 'deaktiviert'}."
 
     elif action == "TRADE":
-        # Hole das aktuell gewählte Paar, Dex etc.
         if not state["pairs"] or not state["dexes"]:
-            await query.message.reply_text("❌ Bitte wähle mindestens 1 Paar und 2 DEX aus!", parse_mode=ParseMode.HTML)
-            return
+            notification_text = "❌ Bitte wähle mindestens 1 Paar und 2 DEX aus!"
+        else:
+            pair_idx = next(iter(state["pairs"]))
+            dex_names = list(state["dexes"])
+            pair = CONFIG["pairs"][pair_idx]
+            dex_a = [d for d in CONFIG["dexes"] if d["name"] == dex_names[0]][0]["router"]
+            dex_b = [d for d in CONFIG["dexes"] if d["name"] == dex_names[1]][0]["router"]
+            token0 = pair["token0"]
+            token1 = pair["token1"]
 
-        # Für Demo nehmen wir das erste ausgewählte Paar und die ersten zwei DEXes:
-        pair_idx = next(iter(state["pairs"]))
-        dex_names = list(state["dexes"])
-        pair = CONFIG["pairs"][pair_idx]
-        dex_a = [d for d in CONFIG["dexes"] if d["name"] == dex_names[0]][0]["router"]
-        dex_b = [d for d in CONFIG["dexes"] if d["name"] == dex_names[1]][0]["router"]
-        token0 = pair["token0"]
-        token1 = pair["token1"]
-
-        # Telegram-Callback als Lambda für Executor:
-        async def telegram_callback(uid, msg):
-            await context.bot.send_message(chat_id=uid, text=msg, parse_mode="HTML")
-        loop = asyncio.get_event_loop()
-        # Starte Executor im Threadpool, weil synchronous!
-        loop.run_in_executor(
-            None,
-            execute_trade,
-            user_id,
-            token0,
-            token1,
-            dex_a,
-            dex_b,
-            1,
-            lambda uid, msg: asyncio.run_coroutine_threadsafe(
-                context.bot.send_message(chat_id=uid, text=msg, parse_mode="HTML"),
-                loop
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(
+                None,
+                execute_trade,
+                user_id,
+                token0,
+                token1,
+                dex_a,
+                dex_b,
+                1,
+                lambda uid, msg: asyncio.run_coroutine_threadsafe(
+                    context.bot.send_message(chat_id=uid, text=msg, parse_mode="HTML"),
+                    loop
+                )
             )
-        )
-        await query.message.reply_text("🚦 Trade wird ausgeführt...", parse_mode=ParseMode.HTML)
-
-    elif action == "STATUS":
-        return await show_status(query, state)
+            notification_text = "🚦 Trade wird ausgeführt..."
 
     elif action == "COPY":
-        await query.message.reply_text(f"📋 Adresse kopiert:\n<code>{value}</code>", parse_mode=ParseMode.HTML)
+        notification_text = f"📋 Adresse kopiert:\n<code>{value}</code>"
 
     elif action == "WITHDRAW":
         tx_hash = await send_eth_to_user(user_id)
-        await query.message.reply_text(
-            f"📤 0.01 Sepolia ETH gesendet!\n🔗 TX Hash: <code>{tx_hash}</code>",
-            parse_mode=ParseMode.HTML
-        )
+        notification_text = f"📤 0.01 Sepolia ETH gesendet!\n🔗 TX Hash: <code>{tx_hash}</code>"
 
-    await query.edit_message_reply_markup(reply_markup=build_keyboard(user_id))
+    if menu_message_id:
+        if notification_text:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=menu_message_id,
+                text=notification_text,
+                reply_markup=build_keyboard(user_id),
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await context.bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=menu_message_id,
+                reply_markup=build_keyboard(user_id)
+            )
 
 async def handle_custom_spread(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    menu_message_id = context.user_data.get("menu_message_id")
+    chat_id = update.effective_chat.id
     if context.user_data.get("awaiting_spread"):
         try:
             val = float(update.message.text)
@@ -241,10 +274,22 @@ async def handle_custom_spread(update: Update, context: ContextTypes.DEFAULT_TYP
                 raise ValueError("Spread außerhalb des erlaubten Bereichs.")
             state = user_state[user_id]
             state["spread"] = str(val)
-            await update.message.reply_text(f"✅ Spread gesetzt auf {val}%", parse_mode=ParseMode.HTML)
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=menu_message_id,
+                text=f"✅ Spread gesetzt auf {val}%",
+                reply_markup=build_keyboard(user_id),
+                parse_mode=ParseMode.HTML
+            )
         except Exception:
             user_state[user_id]["spread"] = "1.0"
-            await update.message.reply_text("❌ Ungültiger Wert. Bitte gib eine Zahl zwischen 0.1 und 10.0 ein.", parse_mode=ParseMode.HTML)
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=menu_message_id,
+                text="❌ Ungültiger Wert. Bitte gib eine Zahl zwischen 0.1 und 10.0 ein.",
+                reply_markup=build_keyboard(user_id),
+                parse_mode=ParseMode.HTML
+            )
         context.user_data["awaiting_spread"] = False
 
 async def show_status(query, state):
@@ -281,6 +326,66 @@ async def show_status(query, state):
     )
     await query.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
+# =============== NEU: /tradelog und /profit ===============
+
+async def tradelog_handler(update, context):
+    user_id = update.effective_user.id
+    log_file = os.path.join("trades", f"tradelog_{user_id}.json")
+
+    if not os.path.exists(log_file):
+        await update.message.reply_text("❌ Kein Tradelog gefunden. Starte einen Trade, um Einträge zu erzeugen!")
+        return
+
+    with open(log_file, "r") as f:
+        trades = json.load(f)
+
+    if not trades:
+        await update.message.reply_text("📄 Noch keine Trades vorhanden.")
+        return
+
+    msg = "<b>Letzte Trades:</b>\n"
+    max_trades = 10
+    for t in trades[-max_trades:]:
+        status = "✅" if t.get("status") == "SUCCESS" else "❌"
+        msg += (
+            f"\n{status} <b>{t['pair']}</b>\n"
+            f"Zeit: <code>{t['timestamp']}</code>\n"
+            f"DEX: {t['dex_a']} ➔ {t['dex_b']}\n"
+            f"Profit: <b>{t.get('profit', 0):.6f} ETH</b>\n"
+            f"Gas: {t.get('gas_used', 'N/A')}\n"
+            f"TX: <code>{t['tx_hashes'][-1] if t['tx_hashes'] else '-'}</code>\n"
+        )
+        if t.get('dev_cut', 0):
+            msg += f"Dev-Cut: <b>{t['dev_cut']:.6f} ETH</b>\n"
+        if t.get('error'):
+            msg += f"Fehler: <code>{t['error']}</code>\n"
+        msg += "—" * 12
+
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+async def profit_handler(update, context):
+    user_id = update.effective_user.id
+    log_file = os.path.join("trades", f"tradelog_{user_id}.json")
+
+    if not os.path.exists(log_file):
+        await update.message.reply_text("❌ Kein Tradelog gefunden. Starte einen Trade, um Gewinne zu sehen!")
+        return
+
+    with open(log_file, "r") as f:
+        trades = json.load(f)
+
+    profit_total = sum(t.get("profit", 0) for t in trades if t.get("status") == "SUCCESS" and t.get("profit") is not None)
+    dev_cut_total = sum(t.get("dev_cut", 0) for t in trades if t.get("status") == "SUCCESS" and t.get("dev_cut") is not None)
+
+    msg = (
+        f"💰 <b>Dein Gesamtprofit:</b> <code>{profit_total:.6f} ETH</code>\n"
+        f"🏦 <b>Abgeführter Dev-Cut:</b> <code>{dev_cut_total:.6f} ETH</code>\n"
+        f"(Trades: {len(trades)})"
+    )
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+# =============== ENDE NEU ===============
+
 def main():
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -290,6 +395,8 @@ def main():
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("wallet", wallet_info))
+    app.add_handler(CommandHandler("tradelog", tradelog_handler))   # <-- NEU
+    app.add_handler(CommandHandler("profit", profit_handler))       # <-- NEU
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_custom_spread))
 
@@ -299,3 +406,5 @@ def main():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     main()
+
+
